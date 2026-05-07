@@ -1,0 +1,62 @@
+version: '3.9'
+
+networks:
+  coreps_net:
+    driver: bridge
+  proxy_net:
+    external: true
+
+volumes:
+  coreps_pg_data:
+
+services:
+
+  coreps_db:
+    image: postgres:16-alpine
+    container_name: coreps_db
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - coreps_pg_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - coreps_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  coreps_api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: coreps_api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@coreps_db:5432/${POSTGRES_DB}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      coreps_db:
+        condition: service_healthy
+    networks:
+      - coreps_net
+      - proxy_net
+
+  coreps_frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: coreps_frontend
+    restart: unless-stopped
+    depends_on:
+      - coreps_api
+    networks:
+      - coreps_net
+      - proxy_net
