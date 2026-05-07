@@ -38,6 +38,15 @@ Adicionar proxy host:
 /root/core-ps/scripts/backup.sh
 ```
 
+## Importar dados do Sistema de Chamados
+
+```bash
+/root/core-ps/scripts/import-chamados.sh
+```
+
+O script importa clientes como entidades e chamados como historico de atendimento.
+Ele pode ser executado novamente sem duplicar chamados ja importados.
+
 ## Cron backup diário (2h)
 
 ```bash

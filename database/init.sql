@@ -68,6 +68,8 @@ CREATE TABLE historico_atendimentos (
   solucao         TEXT,
   responsavel     VARCHAR(150),
   status          VARCHAR(50) NOT NULL DEFAULT 'aberto', -- aberto | em_andamento | concluido
+  origem          VARCHAR(100),
+  origem_codigo   VARCHAR(100),
   atendido_em     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   criado_em       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -103,6 +105,9 @@ CREATE INDEX idx_entidades_tipo         ON entidades(tipo_principal);
 CREATE INDEX idx_entidade_tipos_entid   ON entidade_tipos(entidade_id);
 CREATE INDEX idx_equipamentos_entid     ON equipamentos(entidade_id);
 CREATE INDEX idx_historico_entid        ON historico_atendimentos(entidade_id);
+CREATE UNIQUE INDEX idx_historico_origem_codigo
+  ON historico_atendimentos(origem, origem_codigo)
+  WHERE origem IS NOT NULL AND origem_codigo IS NOT NULL;
 CREATE INDEX idx_entidade_servicos_entid ON entidade_servicos(entidade_id);
 
 -- ─── Usuário admin padrão (senha: Admin@1234 — troque imediatamente) ────
@@ -112,6 +117,6 @@ INSERT INTO usuarios (nome, email, senha_hash, perfil)
 VALUES (
   'Administrador',
   'admin@coreps.local',
-  '$2b$12$fJzK7J5p0EfW2h4S3wK.Ae8hC2TvqpWTDk0j1JHGnZcOw6r7iQBQe',
+  '$2b$12$7FgQtdOF1JnrArpqKeAW/uN3DqXgacoUs5V0D3r7VBZtIB3KCjV72',
   'admin'
 );

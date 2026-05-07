@@ -17,5 +17,9 @@ find "$DIR/backups" -name "coreps_*.sql.gz" -mtime +30 -delete
 
 # Enviar para Google Drive (rclone deve estar configurado)
 if command -v rclone &>/dev/null; then
-  rclone copy "$FILE" gdrive:backups/coreps/ && echo "[$(date)] Upload GDrive OK"
+  if rclone copy "$FILE" gdrive:backups/coreps/; then
+    echo "[$(date)] Upload GDrive OK"
+  else
+    echo "[$(date)] Upload GDrive falhou; backup local preservado em: $FILE" >&2
+  fi
 fi

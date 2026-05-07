@@ -4,3 +4,7 @@ dist/
 logs/
 backups/
 *.log
+*.sql
+*.dump
+*.zip
+*.tar.gz
