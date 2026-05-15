@@ -98,6 +98,35 @@ CREATE TABLE entidade_servicos (
   criado_em   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ─── Agendamentos Massoterapia RJ ───────────────────────────────────────
+
+CREATE TABLE agendamentos (
+  id                    SERIAL PRIMARY KEY,
+  codigo                VARCHAR(40) NOT NULL UNIQUE,
+  entidade_id           INTEGER REFERENCES entidades(id) ON DELETE SET NULL,
+  nome_cliente          VARCHAR(200) NOT NULL,
+  telefone              VARCHAR(40),
+  whatsapp              VARCHAR(40),
+  email                 VARCHAR(180),
+  telegram              VARCHAR(120),
+  servico               VARCHAR(180) NOT NULL,
+  duracao_media         INTEGER,
+  valor_referencia      NUMERIC(10,2),
+  data_agendada         DATE NOT NULL,
+  hora_agendada         TIME NOT NULL,
+  local                 VARCHAR(220),
+  status                VARCHAR(40) NOT NULL DEFAULT 'Pendente',
+  observacoes_cliente   TEXT,
+  observacoes_gerente   TEXT,
+  aprovado_por          INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  colaborador           VARCHAR(180),
+  origem                VARCHAR(120) DEFAULT 'site_massoterapiarj',
+  payload               JSONB,
+  criado_em             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  atualizado_em         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  aprovado_em           TIMESTAMPTZ
+);
+
 -- ─── Índices ──────────────────────────────────────────────────────────────
 
 CREATE INDEX idx_entidades_status       ON entidades(status);
@@ -109,6 +138,9 @@ CREATE UNIQUE INDEX idx_historico_origem_codigo
   ON historico_atendimentos(origem, origem_codigo)
   WHERE origem IS NOT NULL AND origem_codigo IS NOT NULL;
 CREATE INDEX idx_entidade_servicos_entid ON entidade_servicos(entidade_id);
+CREATE INDEX idx_agendamentos_status ON agendamentos(status);
+CREATE INDEX idx_agendamentos_data_hora ON agendamentos(data_agendada, hora_agendada);
+CREATE INDEX idx_agendamentos_entidade ON agendamentos(entidade_id);
 
 -- ─── Usuário admin padrão (senha: Admin@1234 — troque imediatamente) ────
 

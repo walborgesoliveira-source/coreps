@@ -15,6 +15,7 @@ app.use('/api/equipamentos', require('./routes/equipamentos'));
 app.use('/api/historico',   require('./routes/historico'));
 app.use('/api/servicos',    require('./routes/servicos'));
 app.use('/api/usuarios',   require('./routes/usuarios'));
+app.use('/api/agendamentos', require('./routes/agendamentos'));
 
 // Health check
 app.get('/api/health', (_, res) => res.json({ status: 'ok', ts: new Date() }));
