@@ -256,14 +256,14 @@ router.put('/:id/status', async (req, res) => {
   try {
     const r = await db.query(
       `UPDATE agendamentos
-       SET status=$1,
+       SET status=$1::varchar,
            observacoes_gerente=$2,
            colaborador=$3,
            data_agendada=COALESCE($4, data_agendada),
            hora_agendada=COALESCE($5, hora_agendada),
            local=COALESCE($6, local),
-           aprovado_por=CASE WHEN $1 = 'Aprovado' THEN $7 ELSE aprovado_por END,
-           aprovado_em=CASE WHEN $1 = 'Aprovado' THEN NOW() ELSE aprovado_em END,
+           aprovado_por=CASE WHEN $1::varchar = 'Aprovado' THEN $7 ELSE aprovado_por END,
+           aprovado_em=CASE WHEN $1::varchar = 'Aprovado' THEN NOW() ELSE aprovado_em END,
            atualizado_em=NOW()
        WHERE id=$8
        RETURNING *`,
@@ -280,7 +280,8 @@ router.put('/:id/status', async (req, res) => {
     );
     if (!r.rows[0]) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
     res.json(r.rows[0]);
-  } catch {
+  } catch (err) {
+    console.error('Erro ao atualizar agendamento:', err);
     res.status(500).json({ erro: 'Erro ao atualizar agendamento.' });
   }
 });
