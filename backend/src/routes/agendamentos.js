@@ -12,6 +12,12 @@ const STATUS_VALIDOS = new Set([
   'Não compareceu',
 ]);
 
+const STATUS_BLOQUEANTES = ['Pendente', 'Aprovado', 'Reagendado'];
+
+function normalizarHora(valor) {
+  return valor ? String(valor).slice(0, 5) : '';
+}
+
 function requireApiToken(req, res, next) {
   const expected = process.env.AGENDAMENTOS_API_TOKEN;
   if (!expected) {
@@ -91,6 +97,22 @@ async function inserirAgendamento(data) {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+    const conflito = await client.query(
+      `SELECT id, codigo, status
+       FROM agendamentos
+       WHERE data_agendada = $1
+         AND hora_agendada = $2
+         AND COALESCE(local, '') = COALESCE($3, '')
+         AND status = ANY($4)
+       LIMIT 1`,
+      [data.data_agendada, data.hora_agendada, data.local || null, STATUS_BLOQUEANTES]
+    );
+    if (conflito.rows[0]) {
+      const err = new Error('Horário indisponível.');
+      err.code = 'HORARIO_INDISPONIVEL';
+      throw err;
+    }
+
     const entidadeId = await criarEntidadeCliente(client, data);
     const agendamento = await client.query(
       `INSERT INTO agendamentos (
@@ -140,10 +162,54 @@ router.post('/public', requireApiToken, async (req, res) => {
       agendamento,
     });
   } catch (err) {
+    if (err.code === 'HORARIO_INDISPONIVEL') {
+      return res.status(409).json({ erro: 'Horário indisponível para esta data.' });
+    }
     if (err.code === '23505') {
       return res.status(409).json({ erro: 'Agendamento já registrado.' });
     }
     res.status(500).json({ erro: 'Erro ao registrar agendamento.' });
+  }
+});
+
+router.get('/disponibilidade', async (req, res) => {
+  const { data, local } = req.query;
+  if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+    return res.status(400).json({ erro: 'Informe a data no formato AAAA-MM-DD.' });
+  }
+
+  const params = [data, STATUS_BLOQUEANTES];
+  const where = ['data_agendada = $1', 'status = ANY($2)'];
+
+  if (local) {
+    params.push(local);
+    where.push(`COALESCE(local, '') = COALESCE($${params.length}, '')`);
+  }
+
+  try {
+    const r = await db.query(
+      `SELECT hora_agendada, status, COUNT(*)::int AS total
+       FROM agendamentos
+       WHERE ${where.join(' AND ')}
+       GROUP BY hora_agendada, status
+       ORDER BY hora_agendada`,
+      params
+    );
+
+    const horarios_ocupados = [...new Set(r.rows.map((row) => normalizarHora(row.hora_agendada)))];
+    res.json({
+      data,
+      local: local || null,
+      status_bloqueantes: STATUS_BLOQUEANTES,
+      horarios_ocupados,
+      registros: r.rows.map((row) => ({
+        hora: normalizarHora(row.hora_agendada),
+        status: row.status,
+        total: row.total,
+      })),
+    });
+  } catch {
+    res.status(500).json({ erro: 'Erro ao buscar disponibilidade.' });
   }
 });
 
