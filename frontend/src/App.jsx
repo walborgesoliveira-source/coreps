@@ -9,6 +9,7 @@ import EntidadeDetalhe from './pages/EntidadeDetalhe';
 import Equipamentos from './pages/Equipamentos';
 import Historico from './pages/Historico';
 import Servicos from './pages/Servicos';
+import Agendamentos from './pages/Agendamentos';
 
 function PrivateRoute({ children }) {
   const { usuario } = useAuth();
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="equipamentos" element={<Equipamentos />} />
             <Route path="historico" element={<Historico />} />
             <Route path="servicos" element={<Servicos />} />
+            <Route path="agendamentos" element={<Agendamentos />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -182,7 +182,7 @@ router.get('/', async (req, res) => {
 });
 
 router.put('/:id/status', async (req, res) => {
-  const { status, observacoes_gerente, colaborador } = req.body;
+  const { status, observacoes_gerente, colaborador, data_agendada, hora_agendada, local } = req.body;
   if (!STATUS_VALIDOS.has(status)) {
     return res.status(400).json({ erro: 'Status inválido.' });
   }
@@ -193,12 +193,24 @@ router.put('/:id/status', async (req, res) => {
        SET status=$1,
            observacoes_gerente=$2,
            colaborador=$3,
-           aprovado_por=CASE WHEN $1 = 'Aprovado' THEN $4 ELSE aprovado_por END,
+           data_agendada=COALESCE($4, data_agendada),
+           hora_agendada=COALESCE($5, hora_agendada),
+           local=COALESCE($6, local),
+           aprovado_por=CASE WHEN $1 = 'Aprovado' THEN $7 ELSE aprovado_por END,
            aprovado_em=CASE WHEN $1 = 'Aprovado' THEN NOW() ELSE aprovado_em END,
            atualizado_em=NOW()
-       WHERE id=$5
+       WHERE id=$8
        RETURNING *`,
-      [status, observacoes_gerente || null, colaborador || null, req.usuario.id, req.params.id]
+      [
+        status,
+        observacoes_gerente || null,
+        colaborador || null,
+        data_agendada || null,
+        hora_agendada || null,
+        local || null,
+        req.usuario.id,
+        req.params.id,
+      ]
     );
     if (!r.rows[0]) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
     res.json(r.rows[0]);

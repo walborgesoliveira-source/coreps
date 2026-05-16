@@ -4,7 +4,7 @@ import api from '../services/api';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [stats, setStats] = useState({ entidades: 0, equipamentos: 0, abertos: 0, servicos: 0 });
+  const [stats, setStats] = useState({ entidades: 0, equipamentos: 0, abertos: 0, servicos: 0, agendamentos: 0 });
 
   useEffect(() => {
     Promise.allSettled([
@@ -12,12 +12,14 @@ export default function Dashboard() {
       api.get('/equipamentos'),
       api.get('/historico?status=aberto&limit=100'),
       api.get('/servicos'),
-    ]).then(([e, eq, h, s]) => {
+      api.get('/agendamentos?status=Pendente&limit=1'),
+    ]).then(([e, eq, h, s, a]) => {
       setStats({
         entidades:   e.status  === 'fulfilled' ? (e.value.data.total ?? 0)    : 0,
         equipamentos: eq.status === 'fulfilled' ? (eq.value.data.length ?? 0)  : 0,
         abertos:     h.status  === 'fulfilled' ? (h.value.data.length ?? 0)   : 0,
         servicos:    s.status  === 'fulfilled' ? (s.value.data.length ?? 0)   : 0,
+        agendamentos: a.status === 'fulfilled' ? (a.value.data.total ?? 0)     : 0,
       });
     });
   }, []);
@@ -27,6 +29,7 @@ export default function Dashboard() {
     { label: 'Equipamentos',      value: stats.equipamentos, cor: '#7c3aed', path: '/equipamentos' },
     { label: 'Atendimentos abertos', value: stats.abertos,  cor: '#dc2626', path: '/historico' },
     { label: 'Serviços',          value: stats.servicos,     cor: '#059669', path: '/servicos' },
+    { label: 'Agendamentos pendentes', value: stats.agendamentos, cor: '#d97706', path: '/agendamentos' },
   ];
 
   return (

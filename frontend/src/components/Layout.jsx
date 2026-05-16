@@ -7,6 +7,7 @@ const nav = [
   { to: '/equipamentos', label: 'Equipamentos' },
   { to: '/historico',   label: 'Atendimentos' },
   { to: '/servicos',    label: 'Servicos' },
+  { to: '/agendamentos', label: 'Agendamentos' },
 ];
 
 export default function Layout() {
