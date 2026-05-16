@@ -13,9 +13,87 @@ const STATUS_VALIDOS = new Set([
 ]);
 
 const STATUS_BLOQUEANTES = ['Pendente', 'Aprovado', 'Reagendado'];
+const BUSINESS_TIME_ZONE = 'America/Sao_Paulo';
 
 function normalizarHora(valor) {
   return valor ? String(valor).slice(0, 5) : '';
+}
+
+function agoraNoFusoDeAtendimento() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const value = (type) => parts.find((part) => part.type === type)?.value;
+  return {
+    data: `${value('year')}-${value('month')}-${value('day')}`,
+    hora: `${value('hour')}:${value('minute')}`,
+  };
+}
+
+function agendamentoNoPassado(data) {
+  if (!data.data_agendada || !data.hora_agendada) return false;
+  const agora = agoraNoFusoDeAtendimento();
+  const dataHoraAgendada = `${String(data.data_agendada).slice(0, 10)} ${normalizarHora(data.hora_agendada)}`;
+  const dataHoraAtual = `${agora.data} ${agora.hora}`;
+  return dataHoraAgendada <= dataHoraAtual;
+}
+
+function formatarData(valor) {
+  if (!valor) return null;
+  return String(valor).slice(0, 10);
+}
+
+function montarPayloadNotificacao(agendamento) {
+  return {
+    evento: 'agendamento_status',
+    codigo: agendamento.codigo,
+    nome_cliente: agendamento.nome_cliente,
+    email: agendamento.email,
+    telefone: agendamento.telefone,
+    whatsapp: agendamento.whatsapp,
+    servico: agendamento.servico,
+    data_agendada: formatarData(agendamento.data_agendada),
+    hora_agendada: normalizarHora(agendamento.hora_agendada),
+    local: agendamento.local,
+    status: agendamento.status,
+    colaborador: agendamento.colaborador,
+    observacoes_gerente: agendamento.observacoes_gerente,
+  };
+}
+
+async function notificarStatusAgendamento(agendamento) {
+  const url = process.env.AGENDAMENTO_STATUS_WEBHOOK_URL;
+  if (!url || !agendamento.email || agendamento.status !== 'Aprovado') return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 7000);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-agendamentos-token': process.env.AGENDAMENTOS_API_TOKEN || '',
+      },
+      body: JSON.stringify(montarPayloadNotificacao(agendamento)),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      console.error('Falha ao notificar aprovação do agendamento:', response.status, text.slice(0, 300));
+    }
+  } catch (err) {
+    console.error('Erro ao notificar aprovação do agendamento:', err.message);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function requireApiToken(req, res, next) {
@@ -56,6 +134,7 @@ function validarAgendamento(data) {
   if (!data.servico) erros.push('Serviço é obrigatório.');
   if (!data.data_agendada) erros.push('Data é obrigatória.');
   if (!data.hora_agendada) erros.push('Horário é obrigatório.');
+  if (agendamentoNoPassado(data)) erros.push('Escolha um horário futuro para o agendamento.');
   if (!data.whatsapp && !data.telefone && !data.email && !data.telegram) {
     erros.push('Informe ao menos um contato do cliente.');
   }
@@ -254,6 +333,7 @@ router.put('/:id/status', async (req, res) => {
   }
 
   try {
+    const anterior = await db.query('SELECT status FROM agendamentos WHERE id=$1', [req.params.id]);
     const r = await db.query(
       `UPDATE agendamentos
        SET status=$1::varchar,
@@ -279,7 +359,12 @@ router.put('/:id/status', async (req, res) => {
       ]
     );
     if (!r.rows[0]) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
-    res.json(r.rows[0]);
+    const agendamento = r.rows[0];
+    res.json(agendamento);
+
+    if (anterior.rows[0]?.status !== 'Aprovado') {
+      notificarStatusAgendamento(agendamento);
+    }
   } catch (err) {
     console.error('Erro ao atualizar agendamento:', err);
     res.status(500).json({ erro: 'Erro ao atualizar agendamento.' });
