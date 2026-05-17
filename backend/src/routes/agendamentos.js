@@ -69,7 +69,7 @@ function montarPayloadNotificacao(agendamento) {
 
 async function notificarStatusAgendamento(agendamento) {
   const url = process.env.AGENDAMENTO_STATUS_WEBHOOK_URL;
-  if (!url || !agendamento.email || agendamento.status !== 'Aprovado') return;
+  if (!url || agendamento.status !== 'Aprovado') return;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 7000);
@@ -333,7 +333,7 @@ router.put('/:id/status', async (req, res) => {
   }
 
   try {
-    const anterior = await db.query('SELECT status FROM agendamentos WHERE id=$1', [req.params.id]);
+    const anterior = await db.query('SELECT status, colaborador FROM agendamentos WHERE id=$1', [req.params.id]);
     const r = await db.query(
       `UPDATE agendamentos
        SET status=$1::varchar,
@@ -362,7 +362,9 @@ router.put('/:id/status', async (req, res) => {
     const agendamento = r.rows[0];
     res.json(agendamento);
 
-    if (anterior.rows[0]?.status !== 'Aprovado') {
+    const statusMudouParaAprovado = anterior.rows[0]?.status !== 'Aprovado' && agendamento.status === 'Aprovado';
+    const colaboradorMudou = (anterior.rows[0]?.colaborador || '') !== (agendamento.colaborador || '');
+    if (statusMudouParaAprovado || (agendamento.status === 'Aprovado' && colaboradorMudou)) {
       notificarStatusAgendamento(agendamento);
     }
   } catch (err) {
