@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS agendamentos (
   data_agendada         DATE NOT NULL,
   hora_agendada         TIME NOT NULL,
   local                 VARCHAR(220),
-  status                VARCHAR(40) NOT NULL DEFAULT 'Pendente',
+  status                VARCHAR(40) NOT NULL DEFAULT 'Aprovado',
   observacoes_cliente   TEXT,
   observacoes_gerente   TEXT,
   aprovado_por          INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,

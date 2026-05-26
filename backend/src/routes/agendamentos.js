@@ -197,8 +197,8 @@ async function inserirAgendamento(data) {
       `INSERT INTO agendamentos (
         codigo, entidade_id, nome_cliente, telefone, whatsapp, email, telegram,
         servico, duracao_media, valor_referencia, data_agendada, hora_agendada,
-        local, status, observacoes_cliente, origem, payload
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Pendente',$14,$15,$16)
+        local, status, observacoes_cliente, aprovado_em, origem, payload
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Aprovado',$14,NOW(),$15,$16)
       RETURNING *`,
       [
         data.codigo,
