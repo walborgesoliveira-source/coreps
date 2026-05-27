@@ -14,6 +14,11 @@ const STATUS_VALIDOS = new Set([
 
 const STATUS_BLOQUEANTES = ['Pendente', 'Aprovado', 'Reagendado'];
 const BUSINESS_TIME_ZONE = 'America/Sao_Paulo';
+const capacidadePadraoConfig = Number(process.env.AGENDAMENTOS_CAPACIDADE_PADRAO || 2);
+const CAPACIDADE_PADRAO_AGENDAMENTO = Number.isFinite(capacidadePadraoConfig) && capacidadePadraoConfig > 0
+  ? capacidadePadraoConfig
+  : 2;
+let disponibilidadePronta = false;
 
 function normalizarHora(valor) {
   return valor ? String(valor).slice(0, 5) : '';
@@ -46,7 +51,49 @@ function agendamentoNoPassado(data) {
 
 function formatarData(valor) {
   if (!valor) return null;
+  if (valor instanceof Date) return valor.toISOString().slice(0, 10);
   return String(valor).slice(0, 10);
+}
+
+async function garantirTabelaDisponibilidade() {
+  if (disponibilidadePronta) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS colaborador_disponibilidade (
+      id SERIAL PRIMARY KEY,
+      data DATE NOT NULL,
+      hora_inicio TIME NOT NULL,
+      hora_fim TIME NOT NULL,
+      funcionario VARCHAR(180) NOT NULL,
+      disponivel BOOLEAN NOT NULL DEFAULT true,
+      substituto VARCHAR(180),
+      motivo VARCHAR(180),
+      observacoes TEXT,
+      criado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+      criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.query('CREATE INDEX IF NOT EXISTS idx_colaborador_disponibilidade_data ON colaborador_disponibilidade(data)');
+  disponibilidadePronta = true;
+}
+
+function normalizarDisponibilidade(row) {
+  return {
+    ...row,
+    data: formatarData(row.data),
+    hora_inicio: normalizarHora(row.hora_inicio),
+    hora_fim: normalizarHora(row.hora_fim),
+  };
+}
+
+function validarDisponibilidade(body) {
+  const erros = [];
+  if (!body.data || !/^\d{4}-\d{2}-\d{2}$/.test(body.data)) erros.push('Data inválida.');
+  if (!body.hora_inicio || !/^\d{2}:\d{2}$/.test(body.hora_inicio)) erros.push('Horário inicial inválido.');
+  if (!body.hora_fim || !/^\d{2}:\d{2}$/.test(body.hora_fim)) erros.push('Horário final inválido.');
+  if (body.hora_inicio && body.hora_fim && body.hora_inicio >= body.hora_fim) erros.push('Horário final deve ser maior que o inicial.');
+  if (!body.funcionario) erros.push('Funcionário é obrigatório.');
+  return erros;
 }
 
 function montarPayloadNotificacao(agendamento) {
@@ -123,6 +170,7 @@ function normalizarAgendamento(body) {
     hora_agendada: body.hora_agendada || body.time,
     local: body.local || body.location,
     observacoes_cliente: body.observacoes_cliente || body.notes,
+    colaborador: body.profissional_solicitada || body.colaborador || null,
     origem: body.origem || 'site_massoterapiarj',
     payload: body,
   };
@@ -177,16 +225,23 @@ async function inserirAgendamento(data) {
   try {
     await client.query('BEGIN');
     const conflito = await client.query(
-      `SELECT id, codigo, status
+      `SELECT
+         COUNT(*)::int AS total,
+         BOOL_OR(COALESCE(colaborador, '') = $5) AS colaborador_ocupado
        FROM agendamentos
        WHERE data_agendada = $1
          AND hora_agendada = $2
          AND COALESCE(local, '') = COALESCE($3, '')
-         AND status = ANY($4)
-       LIMIT 1`,
-      [data.data_agendada, data.hora_agendada, data.local || null, STATUS_BLOQUEANTES]
+         AND status = ANY($4)`,
+      [data.data_agendada, data.hora_agendada, data.local || null, STATUS_BLOQUEANTES, data.colaborador || '']
     );
-    if (conflito.rows[0]) {
+    const ocupacao = conflito.rows[0] || { total: 0, colaborador_ocupado: false };
+    if (data.colaborador && ocupacao.colaborador_ocupado) {
+      const err = new Error('Profissional indisponível.');
+      err.code = 'HORARIO_INDISPONIVEL';
+      throw err;
+    }
+    if (ocupacao.total >= CAPACIDADE_PADRAO_AGENDAMENTO) {
       const err = new Error('Horário indisponível.');
       err.code = 'HORARIO_INDISPONIVEL';
       throw err;
@@ -197,8 +252,8 @@ async function inserirAgendamento(data) {
       `INSERT INTO agendamentos (
         codigo, entidade_id, nome_cliente, telefone, whatsapp, email, telegram,
         servico, duracao_media, valor_referencia, data_agendada, hora_agendada,
-        local, status, observacoes_cliente, aprovado_em, origem, payload
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Aprovado',$14,NOW(),$15,$16)
+        local, status, observacoes_cliente, aprovado_em, colaborador, origem, payload
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Aprovado',$14,NOW(),$15,$16,$17)
       RETURNING *`,
       [
         data.codigo,
@@ -215,6 +270,7 @@ async function inserirAgendamento(data) {
         data.hora_agendada,
         data.local || null,
         data.observacoes_cliente || null,
+        data.colaborador || null,
         data.origem,
         data.payload,
       ]
@@ -292,6 +348,28 @@ router.get('/disponibilidade', async (req, res) => {
   }
 });
 
+router.get('/colaboradores-disponibilidade', async (req, res) => {
+  const { data } = req.query;
+  if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+    return res.status(400).json({ erro: 'Informe a data no formato AAAA-MM-DD.' });
+  }
+
+  try {
+    await garantirTabelaDisponibilidade();
+    const r = await db.query(
+      `SELECT *
+       FROM colaborador_disponibilidade
+       WHERE data = $1
+       ORDER BY hora_inicio, funcionario, id`,
+      [data]
+    );
+    res.json({ data, registros: r.rows.map(normalizarDisponibilidade) });
+  } catch (err) {
+    console.error('Erro ao buscar disponibilidade dos colaboradores:', err);
+    res.status(500).json({ erro: 'Erro ao buscar disponibilidade dos colaboradores.' });
+  }
+});
+
 router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
@@ -323,6 +401,48 @@ router.get('/', async (req, res) => {
     res.json({ data: dados.rows, total: parseInt(total.rows[0].count), page: parseInt(page), limit: parseInt(limit) });
   } catch {
     res.status(500).json({ erro: 'Erro ao buscar agendamentos.' });
+  }
+});
+
+router.post('/colaboradores-disponibilidade', async (req, res) => {
+  const erros = validarDisponibilidade(req.body || {});
+  if (erros.length) return res.status(400).json({ erros });
+
+  try {
+    await garantirTabelaDisponibilidade();
+    const r = await db.query(
+      `INSERT INTO colaborador_disponibilidade (
+        data, hora_inicio, hora_fim, funcionario, disponivel, substituto, motivo, observacoes, criado_por
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING *`,
+      [
+        req.body.data,
+        req.body.hora_inicio,
+        req.body.hora_fim,
+        req.body.funcionario,
+        req.body.disponivel !== false,
+        req.body.substituto || null,
+        req.body.motivo || null,
+        req.body.observacoes || null,
+        req.usuario.id,
+      ]
+    );
+    res.status(201).json(normalizarDisponibilidade(r.rows[0]));
+  } catch (err) {
+    console.error('Erro ao registrar disponibilidade:', err);
+    res.status(500).json({ erro: 'Erro ao registrar disponibilidade.' });
+  }
+});
+
+router.delete('/colaboradores-disponibilidade/:id', async (req, res) => {
+  try {
+    await garantirTabelaDisponibilidade();
+    const r = await db.query('DELETE FROM colaborador_disponibilidade WHERE id=$1 RETURNING id', [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ erro: 'Registro não encontrado.' });
+    res.status(204).end();
+  } catch (err) {
+    console.error('Erro ao remover disponibilidade:', err);
+    res.status(500).json({ erro: 'Erro ao remover disponibilidade.' });
   }
 });
 

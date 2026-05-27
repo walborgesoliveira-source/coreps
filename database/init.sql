@@ -142,6 +142,24 @@ CREATE INDEX idx_agendamentos_status ON agendamentos(status);
 CREATE INDEX idx_agendamentos_data_hora ON agendamentos(data_agendada, hora_agendada);
 CREATE INDEX idx_agendamentos_entidade ON agendamentos(entidade_id);
 
+CREATE TABLE colaborador_disponibilidade (
+  id          SERIAL PRIMARY KEY,
+  data        DATE NOT NULL,
+  hora_inicio TIME NOT NULL,
+  hora_fim    TIME NOT NULL,
+  funcionario VARCHAR(180) NOT NULL,
+  disponivel  BOOLEAN NOT NULL DEFAULT true,
+  substituto  VARCHAR(180),
+  motivo      VARCHAR(180),
+  observacoes TEXT,
+  criado_por  INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  criado_em   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_colaborador_disponibilidade_data
+  ON colaborador_disponibilidade(data);
+
 -- ─── Usuário admin padrão (senha: Admin@1234 — troque imediatamente) ────
 
 -- Hash bcrypt gerado para 'Admin@1234' com saltRounds=12
