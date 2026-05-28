@@ -254,6 +254,7 @@ function validarAgendamento(data) {
   if (!data.servico) erros.push('Serviço é obrigatório.');
   if (!data.data_agendada) erros.push('Data é obrigatória.');
   if (!data.hora_agendada) erros.push('Horário é obrigatório.');
+  if (!data.colaborador) erros.push('Profissional é obrigatória.');
   if (agendamentoNoPassado(data)) erros.push('Escolha um horário futuro para o agendamento.');
   if (!data.whatsapp && !data.telefone && !data.email && !data.telegram) {
     erros.push('Informe ao menos um contato do cliente.');
