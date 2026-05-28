@@ -10,6 +10,7 @@ const STATUS_VALIDOS = new Set([
   'Cancelado',
   'Concluído',
   'Não compareceu',
+  'Excluído',
 ]);
 
 const STATUS_BLOQUEANTES = ['Pendente', 'Aprovado', 'Reagendado'];
@@ -20,8 +21,79 @@ const CAPACIDADE_PADRAO_AGENDAMENTO = Number.isFinite(capacidadePadraoConfig) &&
   : 2;
 let disponibilidadePronta = false;
 
+const ESCALA_OFICIAL = {
+  '2026-05-28': [
+    { inicio: '12:00', fim: '20:30', profissionais: ['Ellaine', 'Selma'] },
+  ],
+  '2026-05-29': [
+    { inicio: '12:00', fim: '14:00', profissionais: ['Amanda'] },
+    { inicio: '14:00', fim: '20:30', profissionais: ['Amanda', 'Diana'] },
+  ],
+  '2026-05-30': [
+    { inicio: '09:00', fim: '19:00', profissionais: ['Diana'] },
+  ],
+};
+
 function normalizarHora(valor) {
   return valor ? String(valor).slice(0, 5) : '';
+}
+
+function timeToMinutes(valor) {
+  const [hora, minuto] = normalizarHora(valor).split(':').map(Number);
+  return Number.isFinite(hora) && Number.isFinite(minuto) ? hora * 60 + minuto : null;
+}
+
+function duracaoAgendamento(valor) {
+  const duracao = Number(valor || 50);
+  return Number.isFinite(duracao) && duracao > 0 ? duracao : 50;
+}
+
+function horariosSobrepoem(inicioA, duracaoA, inicioB, duracaoB) {
+  const a = timeToMinutes(inicioA);
+  const b = timeToMinutes(inicioB);
+  if (a === null || b === null) return false;
+  return a < b + duracaoAgendamento(duracaoB) && b < a + duracaoAgendamento(duracaoA);
+}
+
+function horarioDentroIntervalo(horario, inicio, fim) {
+  return horario >= normalizarHora(inicio) && horario < normalizarHora(fim);
+}
+
+function profissionaisDaEscala(data, hora) {
+  const dataKey = formatarData(data);
+  const horario = normalizarHora(hora);
+  const blocos = ESCALA_OFICIAL[dataKey] || [];
+  const nomes = blocos
+    .filter((bloco) => horarioDentroIntervalo(horario, bloco.inicio, bloco.fim))
+    .flatMap((bloco) => bloco.profissionais);
+  return [...new Set(nomes)];
+}
+
+async function profissionaisDisponiveisNaEscala(data, hora) {
+  const dataKey = formatarData(data);
+  const horario = normalizarHora(hora);
+  const mapa = new Map(profissionaisDaEscala(dataKey, horario).map((nome) => [nome, nome]));
+
+  await garantirTabelaDisponibilidade();
+  const r = await db.query(
+    `SELECT funcionario, disponivel, substituto
+     FROM colaborador_disponibilidade
+     WHERE data = $1
+       AND $2::time >= hora_inicio
+       AND $2::time < hora_fim`,
+    [dataKey, horario]
+  );
+
+  r.rows.forEach((regra) => {
+    if (regra.disponivel === false) {
+      mapa.delete(regra.funcionario);
+      if (regra.substituto) mapa.set(regra.substituto, regra.substituto);
+    } else {
+      mapa.set(regra.funcionario, regra.funcionario);
+    }
+  });
+
+  return Array.from(mapa.values());
 }
 
 function agoraNoFusoDeAtendimento() {
@@ -189,6 +261,21 @@ function validarAgendamento(data) {
   return erros;
 }
 
+async function validarEscalaAgendamento(data) {
+  const profissionais = await profissionaisDisponiveisNaEscala(data.data_agendada, data.hora_agendada);
+  if (!profissionais.length) {
+    const err = new Error('Sem Atendimento para esta data e horário.');
+    err.code = 'FORA_DA_ESCALA';
+    throw err;
+  }
+  if (data.colaborador && !profissionais.includes(data.colaborador)) {
+    const err = new Error('Profissional fora da escala neste horário.');
+    err.code = 'FORA_DA_ESCALA';
+    throw err;
+  }
+  return profissionais;
+}
+
 async function criarEntidadeCliente(client, data) {
   const contato = data.email || data.whatsapp || data.telefone;
   if (contato) {
@@ -225,23 +312,29 @@ async function inserirAgendamento(data) {
   try {
     await client.query('BEGIN');
     const conflito = await client.query(
-      `SELECT
-         COUNT(*)::int AS total,
-         BOOL_OR(COALESCE(colaborador, '') = $5) AS colaborador_ocupado
+      `SELECT hora_agendada, duracao_media, colaborador
        FROM agendamentos
        WHERE data_agendada = $1
-         AND hora_agendada = $2
-         AND COALESCE(local, '') = COALESCE($3, '')
-         AND status = ANY($4)`,
-      [data.data_agendada, data.hora_agendada, data.local || null, STATUS_BLOQUEANTES, data.colaborador || '']
+         AND COALESCE(local, '') = COALESCE($2, '')
+         AND status = ANY($3)
+       FOR UPDATE`,
+      [data.data_agendada, data.local || null, STATUS_BLOQUEANTES]
     );
-    const ocupacao = conflito.rows[0] || { total: 0, colaborador_ocupado: false };
-    if (data.colaborador && ocupacao.colaborador_ocupado) {
+    const sobrepostos = conflito.rows.filter((row) => (
+      horariosSobrepoem(data.hora_agendada, data.duracao_media, row.hora_agendada, row.duracao_media)
+    ));
+    const colaboradorOcupado = data.colaborador && sobrepostos.some((row) => (
+      (row.colaborador || '') === data.colaborador
+    ));
+    if (colaboradorOcupado) {
       const err = new Error('Profissional indisponível.');
       err.code = 'HORARIO_INDISPONIVEL';
       throw err;
     }
-    if (ocupacao.total >= CAPACIDADE_PADRAO_AGENDAMENTO) {
+    const capacidadeEscala = Array.isArray(data.profissionais_disponiveis) && data.profissionais_disponiveis.length
+      ? data.profissionais_disponiveis.length
+      : CAPACIDADE_PADRAO_AGENDAMENTO;
+    if (sobrepostos.length >= capacidadeEscala) {
       const err = new Error('Horário indisponível.');
       err.code = 'HORARIO_INDISPONIVEL';
       throw err;
@@ -291,12 +384,16 @@ router.post('/public', requireApiToken, async (req, res) => {
   if (erros.length) return res.status(400).json({ erros });
 
   try {
+    data.profissionais_disponiveis = await validarEscalaAgendamento(data);
     const agendamento = await inserirAgendamento(data);
     res.status(201).json({
       mensagem: 'Pedido de agendamento recebido.',
       agendamento,
     });
   } catch (err) {
+    if (err.code === 'FORA_DA_ESCALA') {
+      return res.status(409).json({ erro: err.message, status: 'Sem Atendimento' });
+    }
     if (err.code === 'HORARIO_INDISPONIVEL') {
       return res.status(409).json({ erro: 'Horário indisponível para esta data.' });
     }
@@ -323,10 +420,10 @@ router.get('/disponibilidade', async (req, res) => {
 
   try {
     const r = await db.query(
-      `SELECT hora_agendada, status, COUNT(*)::int AS total
+      `SELECT hora_agendada, status, colaborador, duracao_media, COUNT(*)::int AS total
        FROM agendamentos
        WHERE ${where.join(' AND ')}
-       GROUP BY hora_agendada, status
+       GROUP BY hora_agendada, status, colaborador, duracao_media
        ORDER BY hora_agendada`,
       params
     );
@@ -336,10 +433,13 @@ router.get('/disponibilidade', async (req, res) => {
       data,
       local: local || null,
       status_bloqueantes: STATUS_BLOQUEANTES,
+      escala_oficial: ESCALA_OFICIAL[data] || [],
       horarios_ocupados,
       registros: r.rows.map((row) => ({
         hora: normalizarHora(row.hora_agendada),
         status: row.status,
+        colaborador: row.colaborador || null,
+        duracao_media: duracaoAgendamento(row.duracao_media),
         total: row.total,
       })),
     });
@@ -453,7 +553,21 @@ router.put('/:id/status', async (req, res) => {
   }
 
   try {
-    const anterior = await db.query('SELECT status, colaborador FROM agendamentos WHERE id=$1', [req.params.id]);
+    const anterior = await db.query(
+      'SELECT status, colaborador, data_agendada, hora_agendada FROM agendamentos WHERE id=$1',
+      [req.params.id]
+    );
+    if (!anterior.rows[0]) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
+
+    const dataValidacao = {
+      data_agendada: data_agendada || formatarData(anterior.rows[0].data_agendada),
+      hora_agendada: hora_agendada || normalizarHora(anterior.rows[0].hora_agendada),
+      colaborador: colaborador || null,
+    };
+    if (STATUS_BLOQUEANTES.includes(status)) {
+      await validarEscalaAgendamento(dataValidacao);
+    }
+
     const r = await db.query(
       `UPDATE agendamentos
        SET status=$1::varchar,
@@ -478,7 +592,6 @@ router.put('/:id/status', async (req, res) => {
         req.params.id,
       ]
     );
-    if (!r.rows[0]) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
     const agendamento = r.rows[0];
     res.json(agendamento);
 
@@ -488,6 +601,9 @@ router.put('/:id/status', async (req, res) => {
       notificarStatusAgendamento(agendamento);
     }
   } catch (err) {
+    if (err.code === 'FORA_DA_ESCALA') {
+      return res.status(409).json({ erro: err.message, status: 'Sem Atendimento' });
+    }
     console.error('Erro ao atualizar agendamento:', err);
     res.status(500).json({ erro: 'Erro ao atualizar agendamento.' });
   }
