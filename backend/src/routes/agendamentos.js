@@ -21,18 +21,44 @@ const CAPACIDADE_PADRAO_AGENDAMENTO = Number.isFinite(capacidadePadraoConfig) &&
   : 2;
 let disponibilidadePronta = false;
 
-const ESCALA_OFICIAL = {
-  '2026-05-28': [
-    { inicio: '12:00', fim: '20:30', profissionais: ['Ellaine', 'Selma'] },
+const ESCALA_SEMANAL_OFICIAL = {
+  1: [
+    { inicio: '09:00', fim: '12:00', profissionais: ['Diana'] },
+    { inicio: '12:00', fim: '20:30', profissionais: ['Amanda', 'Fabíola'] },
   ],
-  '2026-05-29': [
-    { inicio: '12:00', fim: '14:00', profissionais: ['Amanda'] },
-    { inicio: '14:00', fim: '20:30', profissionais: ['Amanda', 'Diana'] },
+  2: [
+    { inicio: '09:00', fim: '15:30', profissionais: ['Diana'] },
+    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
+    { inicio: '15:30', fim: '20:30', profissionais: ['Selma'] },
   ],
-  '2026-05-30': [
+  3: [
+    { inicio: '09:00', fim: '20:30', profissionais: ['Diana'] },
+    { inicio: '12:00', fim: '20:30', profissionais: ['Selma'] },
+  ],
+  4: [
+    { inicio: '10:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
+  ],
+  5: [
+    { inicio: '09:00', fim: '15:30', profissionais: ['Diana'] },
+    { inicio: '10:00', fim: '20:30', profissionais: ['Fabíola'] },
+    { inicio: '15:30', fim: '20:30', profissionais: ['Amanda'] },
+  ],
+  6: [
     { inicio: '09:00', fim: '19:00', profissionais: ['Diana'] },
   ],
 };
+
+function diaDaSemanaUTC(data) {
+  const [ano, mes, dia] = String(data || '').split('-').map(Number);
+  if (!ano || !mes || !dia) return null;
+  return new Date(Date.UTC(ano, mes - 1, dia)).getUTCDay();
+}
+
+function getEscalaOficial(data) {
+  const dia = diaDaSemanaUTC(formatarData(data));
+  return ESCALA_SEMANAL_OFICIAL[dia] || [];
+}
 
 function normalizarHora(valor) {
   return valor ? String(valor).slice(0, 5) : '';
@@ -62,7 +88,7 @@ function horarioDentroIntervalo(horario, inicio, fim) {
 function profissionaisDaEscala(data, hora) {
   const dataKey = formatarData(data);
   const horario = normalizarHora(hora);
-  const blocos = ESCALA_OFICIAL[dataKey] || [];
+  const blocos = getEscalaOficial(dataKey);
   const nomes = blocos
     .filter((bloco) => horarioDentroIntervalo(horario, bloco.inicio, bloco.fim))
     .flatMap((bloco) => bloco.profissionais);
@@ -436,7 +462,7 @@ router.get('/disponibilidade', async (req, res) => {
       data,
       local: local || null,
       status_bloqueantes: STATUS_BLOQUEANTES,
-      escala_oficial: ESCALA_OFICIAL[data] || [],
+      escala_oficial: getEscalaOficial(data),
       horarios_ocupados,
       registros: r.rows.map((row) => ({
         hora: normalizarHora(row.hora_agendada),
