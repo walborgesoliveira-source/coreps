@@ -81,24 +81,28 @@ function horariosSobrepoem(inicioA, duracaoA, inicioB, duracaoB) {
   return a < b + duracaoAgendamento(duracaoB) && b < a + duracaoAgendamento(duracaoA);
 }
 
-function horarioDentroIntervalo(horario, inicio, fim) {
-  return horario >= normalizarHora(inicio) && horario < normalizarHora(fim);
+function horarioDentroIntervalo(horario, inicio, fim, duracao = 0) {
+  const horarioMin = timeToMinutes(horario);
+  const inicioMin = timeToMinutes(inicio);
+  const fimMin = timeToMinutes(fim);
+  if (horarioMin === null || inicioMin === null || fimMin === null) return false;
+  return horarioMin >= inicioMin && horarioMin + duracaoAgendamento(duracao) <= fimMin;
 }
 
-function profissionaisDaEscala(data, hora) {
+function profissionaisDaEscala(data, hora, duracao) {
   const dataKey = formatarData(data);
   const horario = normalizarHora(hora);
   const blocos = getEscalaOficial(dataKey);
   const nomes = blocos
-    .filter((bloco) => horarioDentroIntervalo(horario, bloco.inicio, bloco.fim))
+    .filter((bloco) => horarioDentroIntervalo(horario, bloco.inicio, bloco.fim, duracao))
     .flatMap((bloco) => bloco.profissionais);
   return [...new Set(nomes)];
 }
 
-async function profissionaisDisponiveisNaEscala(data, hora) {
+async function profissionaisDisponiveisNaEscala(data, hora, duracao) {
   const dataKey = formatarData(data);
   const horario = normalizarHora(hora);
-  const mapa = new Map(profissionaisDaEscala(dataKey, horario).map((nome) => [nome, nome]));
+  const mapa = new Map(profissionaisDaEscala(dataKey, horario, duracao).map((nome) => [nome, nome]));
 
   await garantirTabelaDisponibilidade();
   const r = await db.query(
@@ -280,6 +284,7 @@ function validarAgendamento(data) {
   if (!data.servico) erros.push('Serviço é obrigatório.');
   if (!data.data_agendada) erros.push('Data é obrigatória.');
   if (!data.hora_agendada) erros.push('Horário é obrigatório.');
+  if (!data.colaborador) erros.push('Profissional é obrigatória.');
   if (agendamentoNoPassado(data)) erros.push('Escolha um horário futuro para o agendamento.');
   if (!data.whatsapp && !data.telefone && !data.email && !data.telegram) {
     erros.push('Informe ao menos um contato do cliente.');
@@ -288,7 +293,7 @@ function validarAgendamento(data) {
 }
 
 async function validarEscalaAgendamento(data) {
-  const profissionais = await profissionaisDisponiveisNaEscala(data.data_agendada, data.hora_agendada);
+  const profissionais = await profissionaisDisponiveisNaEscala(data.data_agendada, data.hora_agendada, data.duracao_media);
   if (!profissionais.length) {
     const err = new Error('Sem Atendimento para esta data e horário.');
     err.code = 'FORA_DA_ESCALA';
@@ -300,6 +305,39 @@ async function validarEscalaAgendamento(data) {
     throw err;
   }
   return profissionais;
+}
+
+function profissionaisOcupadosPorIntervalo(registros, data) {
+  return new Set(
+    registros
+      .filter((row) => row.colaborador)
+      .filter((row) => horariosSobrepoem(
+        data.hora_agendada,
+        data.duracao_media,
+        row.hora_agendada,
+        row.duracao_media
+      ))
+      .map((row) => row.colaborador)
+  );
+}
+
+function validarProfissionalLivre(registros, data) {
+  const ocupados = profissionaisOcupadosPorIntervalo(registros, data);
+  if (data.colaborador && ocupados.has(data.colaborador)) {
+    const err = new Error('Profissional indisponível neste horário.');
+    err.code = 'HORARIO_INDISPONIVEL';
+    throw err;
+  }
+
+  const profissionais = Array.isArray(data.profissionais_disponiveis) ? data.profissionais_disponiveis : [];
+  const livres = profissionais.filter((nome) => !ocupados.has(nome));
+  if (!data.colaborador && livres.length) data.colaborador = livres[0];
+  if (!livres.length && profissionais.length) {
+    const err = new Error('Horário indisponível.');
+    err.code = 'HORARIO_INDISPONIVEL';
+    throw err;
+  }
+  return livres;
 }
 
 async function criarEntidadeCliente(client, data) {
@@ -346,19 +384,12 @@ async function inserirAgendamento(data) {
        FOR UPDATE`,
       [data.data_agendada, data.local || null, STATUS_BLOQUEANTES]
     );
+    const livres = validarProfissionalLivre(conflito.rows, data);
     const sobrepostos = conflito.rows.filter((row) => (
       horariosSobrepoem(data.hora_agendada, data.duracao_media, row.hora_agendada, row.duracao_media)
     ));
-    const colaboradorOcupado = data.colaborador && sobrepostos.some((row) => (
-      (row.colaborador || '') === data.colaborador
-    ));
-    if (colaboradorOcupado) {
-      const err = new Error('Profissional indisponível.');
-      err.code = 'HORARIO_INDISPONIVEL';
-      throw err;
-    }
     const capacidadeEscala = Array.isArray(data.profissionais_disponiveis) && data.profissionais_disponiveis.length
-      ? data.profissionais_disponiveis.length
+      ? livres.length + profissionaisOcupadosPorIntervalo(conflito.rows, data).size
       : CAPACIDADE_PADRAO_AGENDAMENTO;
     if (sobrepostos.length >= capacidadeEscala) {
       const err = new Error('Horário indisponível.');
@@ -411,9 +442,6 @@ router.post('/public', requireApiToken, async (req, res) => {
 
   try {
     data.profissionais_disponiveis = await validarEscalaAgendamento(data);
-    if (!data.colaborador && data.profissionais_disponiveis.length) {
-      data.colaborador = data.profissionais_disponiveis[0];
-    }
     const agendamento = await inserirAgendamento(data);
     res.status(201).json({
       mensagem: 'Pedido de agendamento recebido.',
@@ -576,14 +604,17 @@ router.delete('/colaboradores-disponibilidade/:id', async (req, res) => {
 });
 
 router.put('/:id/status', async (req, res) => {
-  const { status, observacoes_gerente, colaborador, data_agendada, hora_agendada, local } = req.body;
+  const { status, observacoes_gerente, data_agendada, hora_agendada, local } = req.body;
+  const colaboradorFoiInformado = Object.prototype.hasOwnProperty.call(req.body, 'colaborador')
+    || Object.prototype.hasOwnProperty.call(req.body, 'profissional_solicitada');
+  const colaboradorRecebido = req.body.colaborador || req.body.profissional_solicitada || null;
   if (!STATUS_VALIDOS.has(status)) {
     return res.status(400).json({ erro: 'Status inválido.' });
   }
 
   try {
     const anterior = await db.query(
-      'SELECT status, colaborador, data_agendada, hora_agendada FROM agendamentos WHERE id=$1',
+      'SELECT status, colaborador, data_agendada, hora_agendada, duracao_media FROM agendamentos WHERE id=$1',
       [req.params.id]
     );
     if (!anterior.rows[0]) return res.status(404).json({ erro: 'Agendamento não encontrado.' });
@@ -591,10 +622,20 @@ router.put('/:id/status', async (req, res) => {
     const dataValidacao = {
       data_agendada: data_agendada || formatarData(anterior.rows[0].data_agendada),
       hora_agendada: hora_agendada || normalizarHora(anterior.rows[0].hora_agendada),
-      colaborador: colaborador || null,
+      duracao_media: anterior.rows[0].duracao_media,
+      colaborador: colaboradorFoiInformado ? colaboradorRecebido : anterior.rows[0].colaborador || null,
     };
     if (STATUS_BLOQUEANTES.includes(status)) {
-      await validarEscalaAgendamento(dataValidacao);
+      dataValidacao.profissionais_disponiveis = await validarEscalaAgendamento(dataValidacao);
+      const conflito = await db.query(
+        `SELECT hora_agendada, duracao_media, colaborador
+         FROM agendamentos
+         WHERE id <> $1
+           AND data_agendada = $2
+           AND status = ANY($3)`,
+        [req.params.id, dataValidacao.data_agendada, STATUS_BLOQUEANTES]
+      );
+      validarProfissionalLivre(conflito.rows, dataValidacao);
     }
 
     const r = await db.query(
@@ -613,7 +654,7 @@ router.put('/:id/status', async (req, res) => {
       [
         status,
         observacoes_gerente || null,
-        colaborador || null,
+        dataValidacao.colaborador || null,
         data_agendada || null,
         hora_agendada || null,
         local || null,
