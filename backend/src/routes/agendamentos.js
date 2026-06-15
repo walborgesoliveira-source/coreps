@@ -49,6 +49,18 @@ const ESCALA_SEMANAL_OFICIAL = {
   ],
 };
 
+const ESCALA_POR_DATA_OFICIAL = {
+  '2026-06-16': [
+    { inicio: '09:00', fim: '15:30', profissionais: ['Diana'] },
+    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
+    { inicio: '11:30', fim: '20:30', profissionais: ['Selma'] },
+  ],
+  '2026-06-17': [
+    { inicio: '09:00', fim: '20:30', profissionais: ['Diana'] },
+    { inicio: '12:00', fim: '20:30', profissionais: ['Selma'] },
+  ],
+};
+
 function diaDaSemanaUTC(data) {
   const [ano, mes, dia] = String(data || '').split('-').map(Number);
   if (!ano || !mes || !dia) return null;
@@ -56,7 +68,9 @@ function diaDaSemanaUTC(data) {
 }
 
 function getEscalaOficial(data) {
-  const dia = diaDaSemanaUTC(formatarData(data));
+  const dataKey = formatarData(data);
+  if (ESCALA_POR_DATA_OFICIAL[dataKey]) return ESCALA_POR_DATA_OFICIAL[dataKey];
+  const dia = diaDaSemanaUTC(dataKey);
   return ESCALA_SEMANAL_OFICIAL[dia] || [];
 }
 
