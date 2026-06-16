@@ -15,6 +15,8 @@ const STATUS_VALIDOS = new Set([
 
 const STATUS_BLOQUEANTES = ['Pendente', 'Aprovado', 'Reagendado'];
 const BUSINESS_TIME_ZONE = 'America/Sao_Paulo';
+const SESSION_MIN = 50;
+const SLOT_STEP_MIN = 30;
 const capacidadePadraoConfig = Number(process.env.AGENDAMENTOS_CAPACIDADE_PADRAO || 2);
 const CAPACIDADE_PADRAO_AGENDAMENTO = Number.isFinite(capacidadePadraoConfig) && capacidadePadraoConfig > 0
   ? capacidadePadraoConfig
@@ -84,8 +86,15 @@ function timeToMinutes(valor) {
 }
 
 function duracaoAgendamento(valor) {
-  const duracao = Number(valor || 50);
-  return Number.isFinite(duracao) && duracao > 0 ? duracao : 50;
+  const duracao = Number(valor || SESSION_MIN);
+  return Number.isFinite(duracao) && duracao > 0 ? duracao : SESSION_MIN;
+}
+
+function minutesToTime(totalMinutes) {
+  const minutes = Math.max(0, totalMinutes);
+  const hh = Math.floor(minutes / 60);
+  const mm = minutes % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
 function horariosSobrepoem(inicioA, duracaoA, inicioB, duracaoB) {
@@ -138,6 +147,139 @@ async function profissionaisDisponiveisNaEscala(data, hora, duracao) {
   });
 
   return Array.from(mapa.values());
+}
+
+async function buscarRegrasDisponibilidade(data) {
+  await garantirTabelaDisponibilidade();
+  const r = await db.query(
+    `SELECT *
+     FROM colaborador_disponibilidade
+     WHERE data = $1
+     ORDER BY hora_inicio, funcionario, id`,
+    [formatarData(data)]
+  );
+  return r.rows.map(normalizarDisponibilidade);
+}
+
+function regraAfetaHorario(regra, horario) {
+  const hora = normalizarHora(horario);
+  return hora >= normalizarHora(regra.hora_inicio) && hora < normalizarHora(regra.hora_fim);
+}
+
+function aplicarRegrasDisponibilidade(data, hora, duracao, regras) {
+  const mapa = new Map(profissionaisDaEscala(data, hora, duracao).map((nome) => [nome, nome]));
+  regras
+    .filter((regra) => regraAfetaHorario(regra, hora))
+    .forEach((regra) => {
+      if (regra.disponivel === false) {
+        mapa.delete(regra.funcionario);
+        if (regra.substituto) mapa.set(regra.substituto, regra.substituto);
+      } else {
+        mapa.set(regra.funcionario, regra.funcionario);
+      }
+    });
+  return Array.from(mapa.values());
+}
+
+function profissionaisLivresNoHorario(registros, hora, duracao, profissionais) {
+  const sobrepostos = registros.filter((row) => horariosSobrepoem(
+    hora,
+    duracao,
+    row.hora_agendada,
+    row.duracao_media
+  ));
+  const ocupadosNomeados = new Set(sobrepostos.map((row) => row.colaborador).filter(Boolean));
+  const livresNomeados = profissionais.filter((nome) => !ocupadosNomeados.has(nome));
+  const vagas = Math.max(0, profissionais.length - sobrepostos.length);
+  return {
+    profissionais_livres: livresNomeados.slice(0, vagas),
+    profissionais_ocupados: Array.from(ocupadosNomeados),
+    total_ocupado: sobrepostos.length,
+  };
+}
+
+async function buscarAgendamentosBloqueantes(data, local) {
+  const params = [data, STATUS_BLOQUEANTES];
+  const where = ['data_agendada = $1', 'status = ANY($2)'];
+
+  if (local) {
+    params.push(local);
+    where.push(`COALESCE(local, '') = COALESCE($${params.length}, '')`);
+  }
+
+  const r = await db.query(
+    `SELECT hora_agendada, status, colaborador, duracao_media, COUNT(*)::int AS total
+     FROM agendamentos
+     WHERE ${where.join(' AND ')}
+     GROUP BY hora_agendada, status, colaborador, duracao_media
+     ORDER BY hora_agendada`,
+    params
+  );
+
+  return r.rows.flatMap((row) => {
+    const total = Math.max(1, Number(row.total || 1));
+    return Array.from({ length: total }, () => ({
+      hora_agendada: normalizarHora(row.hora_agendada),
+      status: row.status,
+      colaborador: row.colaborador || null,
+      duracao_media: duracaoAgendamento(row.duracao_media),
+    }));
+  });
+}
+
+async function calcularHorariosDisponiveis({ data, local, duracao }) {
+  const dataKey = formatarData(data);
+  const duracaoSessao = duracaoAgendamento(duracao);
+  const escala = getEscalaOficial(dataKey);
+  const [regras, registros] = await Promise.all([
+    buscarRegrasDisponibilidade(dataKey),
+    buscarAgendamentosBloqueantes(dataKey, local),
+  ]);
+  const horariosBase = [];
+
+  escala.forEach((bloco) => {
+    const startMin = timeToMinutes(bloco.inicio);
+    const endMin = timeToMinutes(bloco.fim);
+    if (startMin === null || endMin === null) return;
+    const lastStart = endMin - duracaoSessao;
+    for (let t = startMin; t <= lastStart; t += SLOT_STEP_MIN) {
+      horariosBase.push(minutesToTime(t));
+    }
+  });
+
+  registros.forEach((registro) => {
+    const inicio = timeToMinutes(registro.hora_agendada);
+    if (inicio === null) return;
+    const proximoInicio = inicio + duracaoAgendamento(registro.duracao_media);
+    const encaixaEmAlgumBloco = escala.some((bloco) => (
+      proximoInicio >= timeToMinutes(bloco.inicio)
+      && proximoInicio + duracaoSessao <= timeToMinutes(bloco.fim)
+    ));
+    if (encaixaEmAlgumBloco) horariosBase.push(minutesToTime(proximoInicio));
+  });
+
+  const horarios = [...new Set(horariosBase)].sort().map((hora) => {
+    const profissionais = aplicarRegrasDisponibilidade(dataKey, hora, duracaoSessao, regras);
+    const ocupacao = profissionaisLivresNoHorario(registros, hora, duracaoSessao, profissionais);
+    const disponivel = ocupacao.profissionais_livres.length > 0;
+    return {
+      hora,
+      disponivel,
+      motivo: disponivel ? null : 'Sem Atendimento',
+      profissionais,
+      ...ocupacao,
+    };
+  });
+
+  return {
+    data: dataKey,
+    local: local || null,
+    duracao_media: duracaoSessao,
+    escala_oficial: escala,
+    regras,
+    horarios,
+    horarios_disponiveis: horarios.filter((slot) => slot.disponivel).map((slot) => slot.hora),
+  };
 }
 
 function agoraNoFusoDeAtendimento() {
@@ -538,6 +680,21 @@ router.get('/colaboradores-disponibilidade', async (req, res) => {
   } catch (err) {
     console.error('Erro ao buscar disponibilidade dos colaboradores:', err);
     res.status(500).json({ erro: 'Erro ao buscar disponibilidade dos colaboradores.' });
+  }
+});
+
+router.get('/horarios-disponiveis', async (req, res) => {
+  const { data, local, duracao } = req.query;
+  if (!data || !/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+    return res.status(400).json({ erro: 'Informe a data no formato AAAA-MM-DD.' });
+  }
+
+  try {
+    const resultado = await calcularHorariosDisponiveis({ data, local, duracao });
+    res.json(resultado);
+  } catch (err) {
+    console.error('Erro ao calcular horários disponíveis:', err);
+    res.status(500).json({ erro: 'Erro ao calcular horários disponíveis.' });
   }
 });
 
