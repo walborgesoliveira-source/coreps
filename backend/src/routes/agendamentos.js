@@ -25,8 +25,8 @@ let disponibilidadePronta = false;
 
 const ESCALA_SEMANAL_OFICIAL = {
   1: [
-    { inicio: '09:00', fim: '12:00', profissionais: ['Diana'] },
-    { inicio: '12:00', fim: '20:30', profissionais: ['Amanda', 'Fabíola'] },
+    { inicio: '09:00', fim: '20:30', profissionais: ['Diana'] },
+    { inicio: '12:00', fim: '20:30', profissionais: ['Amanda'] },
   ],
   2: [
     { inicio: '09:00', fim: '15:30', profissionais: ['Diana'] },
