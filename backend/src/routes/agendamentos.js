@@ -61,6 +61,28 @@ const ESCALA_POR_DATA_OFICIAL = {
     { inicio: '09:00', fim: '20:30', profissionais: ['Diana'] },
     { inicio: '12:00', fim: '20:30', profissionais: ['Selma'] },
   ],
+  '2026-06-30': [
+    { inicio: '09:00', fim: '20:30', profissionais: ['Diana'] },
+    { inicio: '15:30', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '09:00', fim: '20:30', profissionais: ['Ellaine'] },
+  ],
+  '2026-07-01': [
+    { inicio: '09:00', fim: '20:30', profissionais: ['Diana'] },
+    { inicio: '15:30', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '15:30', fim: '20:30', profissionais: ['Fabíola'] },
+  ],
+  '2026-07-02': [
+    { inicio: '11:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '15:30', fim: '20:30', profissionais: ['Amanda'] },
+    { inicio: '09:00', fim: '15:30', profissionais: ['Ellaine'] },
+  ],
+  '2026-07-03': [
+    { inicio: '09:00', fim: '20:30', profissionais: ['Diana'] },
+    { inicio: '12:00', fim: '20:30', profissionais: ['Fabíola'] },
+  ],
+  '2026-07-04': [
+    { inicio: '09:00', fim: '19:00', profissionais: ['Diana'] },
+  ],
 };
 
 function diaDaSemanaUTC(data) {
