@@ -22,32 +22,31 @@ const CAPACIDADE_PADRAO_AGENDAMENTO = Number.isFinite(capacidadePadraoConfig) &&
   ? capacidadePadraoConfig
   : 2;
 let disponibilidadePronta = false;
+const PROFISSIONAIS_ATIVAS = new Set(['Ellaine', 'Júlio César', 'Selma']);
 
 const ESCALA_SEMANAL_OFICIAL = {
   1: [
-    { inicio: '09:00', fim: '20:30', profissionais: ['Diana'] },
-    { inicio: '12:00', fim: '20:30', profissionais: ['Amanda'] },
+    { inicio: '09:00', fim: '20:00', profissionais: ['Júlio César'] },
   ],
   2: [
-    { inicio: '09:00', fim: '15:30', profissionais: ['Diana'] },
-    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
-    { inicio: '15:30', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '09:00', fim: '11:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
   ],
   3: [
-    { inicio: '09:00', fim: '20:30', profissionais: ['Diana'] },
-    { inicio: '12:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '09:00', fim: '11:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
   ],
   4: [
-    { inicio: '10:00', fim: '20:30', profissionais: ['Selma'] },
-    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
+    { inicio: '09:00', fim: '11:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
   ],
   5: [
-    { inicio: '09:00', fim: '15:30', profissionais: ['Diana'] },
-    { inicio: '10:00', fim: '20:30', profissionais: ['Fabíola'] },
-    { inicio: '15:30', fim: '20:30', profissionais: ['Amanda'] },
+    { inicio: '09:00', fim: '20:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine'] },
+    { inicio: '14:00', fim: '20:00', profissionais: ['Selma'] },
   ],
   6: [
-    { inicio: '09:00', fim: '19:00', profissionais: ['Diana'] },
+    { inicio: '09:00', fim: '18:00', profissionais: ['Júlio César'] },
   ],
 };
 
@@ -105,6 +104,57 @@ const ESCALA_POR_DATA_OFICIAL = {
   '2026-07-11': [
     { inicio: '09:00', fim: '19:00', profissionais: ['Diana'] },
   ],
+  '2026-07-27': [
+    { inicio: '14:00', fim: '20:00', profissionais: ['Amanda', 'Fabíola'] },
+  ],
+  '2026-07-28': [
+    { inicio: '14:00', fim: '20:00', profissionais: ['Fabíola'] },
+    { inicio: '12:00', fim: '20:00', profissionais: ['Selma'] },
+  ],
+  '2026-07-29': [
+    { inicio: '12:00', fim: '20:00', profissionais: ['Selma'] },
+  ],
+  '2026-07-30': [
+    { inicio: '14:00', fim: '20:00', profissionais: ['Amanda'] },
+    { inicio: '12:00', fim: '20:00', profissionais: ['Selma'] },
+  ],
+  '2026-07-31': [
+    { inicio: '12:00', fim: '20:00', profissionais: ['Amanda', 'Fabíola'] },
+  ],
+  '2026-08-01': [],
+  '2026-08-03': [],
+  '2026-08-04': [
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
+  ],
+  '2026-08-05': [
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
+  ],
+  '2026-08-06': [
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
+  ],
+  '2026-08-07': [
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine'] },
+    { inicio: '14:00', fim: '20:00', profissionais: ['Selma'] },
+  ],
+  '2026-08-08': [],
+  '2026-08-10': [],
+  '2026-08-11': [
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
+  ],
+  '2026-08-12': [
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
+  ],
+  '2026-08-13': [
+    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
+  ],
+  '2026-08-14': [
+    { inicio: '09:00', fim: '20:00', profissionais: ['Júlio César'] },
+    { inicio: '14:00', fim: '20:00', profissionais: ['Selma'] },
+  ],
+  '2026-08-15': [
+    { inicio: '09:00', fim: '18:00', profissionais: ['Júlio César'] },
+  ],
+  '2026-08-16': [],
 };
 
 function diaDaSemanaUTC(data) {
@@ -182,9 +232,10 @@ async function profissionaisDisponiveisNaEscala(data, hora, duracao) {
   );
 
   r.rows.forEach((regra) => {
+    if (!PROFISSIONAIS_ATIVAS.has(regra.funcionario)) return;
     if (regra.disponivel === false) {
       mapa.delete(regra.funcionario);
-      if (regra.substituto) mapa.set(regra.substituto, regra.substituto);
+      if (PROFISSIONAIS_ATIVAS.has(regra.substituto)) mapa.set(regra.substituto, regra.substituto);
     } else {
       mapa.set(regra.funcionario, regra.funcionario);
     }
@@ -202,7 +253,9 @@ async function buscarRegrasDisponibilidade(data) {
      ORDER BY hora_inicio, funcionario, id`,
     [formatarData(data)]
   );
-  return r.rows.map(normalizarDisponibilidade);
+  return r.rows
+    .map(normalizarDisponibilidade)
+    .filter((regra) => PROFISSIONAIS_ATIVAS.has(regra.funcionario));
 }
 
 function regraAfetaHorario(regra, horario) {
@@ -214,10 +267,11 @@ function aplicarRegrasDisponibilidade(data, hora, duracao, regras) {
   const mapa = new Map(profissionaisDaEscala(data, hora, duracao).map((nome) => [nome, nome]));
   regras
     .filter((regra) => regraAfetaHorario(regra, hora))
+    .filter((regra) => PROFISSIONAIS_ATIVAS.has(regra.funcionario))
     .forEach((regra) => {
       if (regra.disponivel === false) {
         mapa.delete(regra.funcionario);
-        if (regra.substituto) mapa.set(regra.substituto, regra.substituto);
+        if (PROFISSIONAIS_ATIVAS.has(regra.substituto)) mapa.set(regra.substituto, regra.substituto);
       } else {
         mapa.set(regra.funcionario, regra.funcionario);
       }
@@ -720,7 +774,10 @@ router.get('/colaboradores-disponibilidade', async (req, res) => {
        ORDER BY hora_inicio, funcionario, id`,
       [data]
     );
-    res.json({ data, registros: r.rows.map(normalizarDisponibilidade) });
+    const registros = r.rows
+      .map(normalizarDisponibilidade)
+      .filter((regra) => PROFISSIONAIS_ATIVAS.has(regra.funcionario));
+    res.json({ data, registros });
   } catch (err) {
     console.error('Erro ao buscar disponibilidade dos colaboradores:', err);
     res.status(500).json({ erro: 'Erro ao buscar disponibilidade dos colaboradores.' });
@@ -778,6 +835,8 @@ router.get('/', async (req, res) => {
 
 router.post('/colaboradores-disponibilidade', async (req, res) => {
   const erros = validarDisponibilidade(req.body || {});
+  if (!PROFISSIONAIS_ATIVAS.has(req.body?.funcionario)) erros.push('Profissional não está ativa.');
+  if (req.body?.substituto && !PROFISSIONAIS_ATIVAS.has(req.body.substituto)) erros.push('Profissional substituta não está ativa.');
   if (erros.length) return res.status(400).json({ erros });
 
   try {
