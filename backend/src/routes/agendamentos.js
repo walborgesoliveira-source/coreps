@@ -155,6 +155,49 @@ const ESCALA_POR_DATA_OFICIAL = {
     { inicio: '09:00', fim: '18:00', profissionais: ['Júlio César'] },
   ],
   '2026-08-16': [],
+  '2026-09-07': [
+    { inicio: '09:00', fim: '20:30', profissionais: ['Júlio César'] },
+  ],
+  '2026-09-08': [
+    { inicio: '10:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
+  ],
+  '2026-09-09': [
+    { inicio: '10:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
+  ],
+  '2026-09-10': [
+    { inicio: '10:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
+  ],
+  '2026-09-11': [
+    { inicio: '09:00', fim: '20:30', profissionais: ['Júlio César'] },
+    { inicio: '10:00', fim: '20:30', profissionais: ['Selma'] },
+  ],
+  '2026-09-12': [{ inicio: '09:00', fim: '17:00', profissionais: ['Júlio César'] }],
+  '2026-09-14': [
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
+    { inicio: '14:00', fim: '20:30', profissionais: ['Selma'] },
+  ],
+  '2026-09-15': [
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '20:30', profissionais: ['Selma'] },
+  ],
+  '2026-09-16': [
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '20:30', profissionais: ['Selma'] },
+  ],
+  '2026-09-17': [
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '20:30', profissionais: ['Selma'] },
+  ],
+  '2026-09-18': [
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
+    { inicio: '10:00', fim: '20:30', profissionais: ['Selma'] },
+  ],
+  '2026-09-19': [
+    { inicio: '09:00', fim: '16:00', profissionais: ['Júlio César'] },
+  ],
 };
 
 function diaDaSemanaUTC(data) {
@@ -223,16 +266,15 @@ async function profissionaisDisponiveisNaEscala(data, hora, duracao) {
 
   await garantirTabelaDisponibilidade();
   const r = await db.query(
-    `SELECT funcionario, disponivel, substituto
+    `SELECT funcionario, disponivel, substituto, hora_inicio, hora_fim
      FROM colaborador_disponibilidade
-     WHERE data = $1
-       AND $2::time >= hora_inicio
-       AND $2::time < hora_fim`,
-    [dataKey, horario]
+     WHERE data = $1`,
+    [dataKey]
   );
 
   r.rows.forEach((regra) => {
     if (!PROFISSIONAIS_ATIVAS.has(regra.funcionario)) return;
+    if (!regraAfetaHorario(regra, horario, duracao)) return;
     if (regra.disponivel === false) {
       mapa.delete(regra.funcionario);
       if (PROFISSIONAIS_ATIVAS.has(regra.substituto)) mapa.set(regra.substituto, regra.substituto);
@@ -258,15 +300,24 @@ async function buscarRegrasDisponibilidade(data) {
     .filter((regra) => PROFISSIONAIS_ATIVAS.has(regra.funcionario));
 }
 
-function regraAfetaHorario(regra, horario) {
-  const hora = normalizarHora(horario);
-  return hora >= normalizarHora(regra.hora_inicio) && hora < normalizarHora(regra.hora_fim);
+function regraAfetaHorario(regra, horario, duracao = 0) {
+  const inicioAgendamento = timeToMinutes(horario);
+  const inicioRegra = timeToMinutes(regra.hora_inicio);
+  const fimRegra = timeToMinutes(regra.hora_fim);
+  if (inicioAgendamento === null || inicioRegra === null || fimRegra === null) return false;
+
+  const fimAgendamento = inicioAgendamento + duracaoAgendamento(duracao);
+  if (regra.disponivel === false) {
+    return inicioAgendamento < fimRegra && inicioRegra < fimAgendamento;
+  }
+
+  return inicioAgendamento >= inicioRegra && inicioAgendamento < fimRegra;
 }
 
 function aplicarRegrasDisponibilidade(data, hora, duracao, regras) {
   const mapa = new Map(profissionaisDaEscala(data, hora, duracao).map((nome) => [nome, nome]));
   regras
-    .filter((regra) => regraAfetaHorario(regra, hora))
+    .filter((regra) => regraAfetaHorario(regra, hora, duracao))
     .filter((regra) => PROFISSIONAIS_ATIVAS.has(regra.funcionario))
     .forEach((regra) => {
       if (regra.disponivel === false) {
