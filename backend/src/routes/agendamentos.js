@@ -200,7 +200,6 @@ const ESCALA_POR_DATA_OFICIAL = {
   ],
   '2026-09-21': [
     { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
-    { inicio: '14:00', fim: '20:30', profissionais: ['Selma'] },
   ],
   '2026-09-22': [
     { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
