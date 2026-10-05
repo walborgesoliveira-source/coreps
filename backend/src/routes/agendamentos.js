@@ -24,30 +24,44 @@ const CAPACIDADE_PADRAO_AGENDAMENTO = Number.isFinite(capacidadePadraoConfig) &&
 let disponibilidadePronta = false;
 const PROFISSIONAIS_ATIVAS = new Set(['Ellaine', 'Júlio César', 'Selma']);
 
+const ESCALA_SEMANAL_ANTERIOR = {
+  1: [],
+  2: [{ inicio: '11:00', fim: '20:30', profissionais: ['Ellaine', 'Selma'] }],
+  3: [{ inicio: '11:00', fim: '20:30', profissionais: ['Ellaine', 'Selma'] }],
+  4: [{ inicio: '11:00', fim: '20:30', profissionais: ['Ellaine', 'Selma'] }],
+  5: [
+    { inicio: '09:00', fim: '20:30', profissionais: ['Júlio César'] },
+    { inicio: '10:00', fim: '20:30', profissionais: ['Selma'] },
+  ],
+  6: [{ inicio: '09:00', fim: '17:00', profissionais: ['Júlio César'] }],
+};
+
+// Nova escala vigente a partir de 05/10/2026; histórico preservado.
 const ESCALA_SEMANAL_OFICIAL = {
   1: [
-    { inicio: '09:00', fim: '20:00', profissionais: ['Júlio César'] },
+    { inicio: '14:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
   ],
   2: [
-    { inicio: '09:00', fim: '11:00', profissionais: ['Júlio César'] },
-    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
+    { inicio: '11:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
   ],
   3: [
-    { inicio: '09:00', fim: '11:00', profissionais: ['Júlio César'] },
-    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
+    { inicio: '11:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
   ],
   4: [
-    { inicio: '09:00', fim: '11:00', profissionais: ['Júlio César'] },
-    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine', 'Selma'] },
+    { inicio: '11:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
+    { inicio: '11:00', fim: '19:00', profissionais: ['Ellaine'] },
   ],
   5: [
-    { inicio: '09:00', fim: '20:00', profissionais: ['Júlio César'] },
-    { inicio: '11:00', fim: '20:00', profissionais: ['Ellaine'] },
-    { inicio: '14:00', fim: '20:00', profissionais: ['Selma'] },
+    { inicio: '10:00', fim: '20:30', profissionais: ['Selma'] },
+    { inicio: '11:00', fim: '18:00', profissionais: ['Júlio César'] },
   ],
-  6: [
-    { inicio: '09:00', fim: '18:00', profissionais: ['Júlio César'] },
-  ],
+  6: [{ inicio: '09:00', fim: '16:00', profissionais: ['Júlio César'] }],
 };
 
 const ESCALA_POR_DATA_OFICIAL = {
@@ -233,7 +247,7 @@ function getEscalaOficial(data) {
   const dataKey = formatarData(data);
   if (ESCALA_POR_DATA_OFICIAL[dataKey]) return ESCALA_POR_DATA_OFICIAL[dataKey];
   const dia = diaDaSemanaUTC(dataKey);
-  return ESCALA_SEMANAL_OFICIAL[dia] || [];
+  return (dataKey >= '2026-10-05' ? ESCALA_SEMANAL_OFICIAL : ESCALA_SEMANAL_ANTERIOR)[dia] || [];
 }
 
 function normalizarHora(valor) {
